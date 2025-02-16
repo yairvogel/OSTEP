@@ -1,11 +1,12 @@
 #include <assert.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include "syntax.h"
 
 #define UNUSED(x) (void)(x)
 
@@ -14,12 +15,12 @@
 typedef struct {
   char* key;
   char* value;
-} KeyValuePair;
+} kvpair_t;
 
-KeyValuePair variables[100] = { 0 };
+kvpair_t variables[100] = { 0 };
 
-int assignVariable(char* var, char* val, KeyValuePair variables[100]);
-char* getVariable(char* const var, KeyValuePair variables[100]);
+int setvar(char* var, char* val, kvpair_t variables[100]);
+char* getvar(char* const var, kvpair_t variables[100]);
 __pid_t execcmd(char* tokens[], char* outfile);
 
 int main(int argc, char* argv[]) {
@@ -44,7 +45,7 @@ int main(int argc, char* argv[]) {
     char val[BUFLEN];
     int l = sscanf(buf, "%s = %s\n", var, val);
     if (l == 2) {
-      assignVariable(var, val, variables);
+      setvar(var, val, variables);
       continue;
     }
     
@@ -56,7 +57,7 @@ int main(int argc, char* argv[]) {
 
       // parameter expansion
       if (tok[0] == '$') {
-        char* val = getVariable(tok+1, variables);
+        char* val = getvar(tok+1, variables);
         if (val == NULL) {
           *tok = '\0';
         } else {
@@ -84,63 +85,41 @@ int main(int argc, char* argv[]) {
       tokens[len-2] = NULL;
     }
 
-    int cid = execcmd(tokens, outfile);
+    syntaxtree_t* syntax = stparse(tokens);
+    int* cids = stexec(syntax, outfile);
+
     int status;
-    if (waitpid(cid, &status, 0) == -1) {
-      perror("waitpid falied");
-      exit(EXIT_FAILURE);
+    for (int* cid = cids; *cid != -1; cid++) {
+      int p_st;
+      if (waitpid(*cid, &p_st, 0) == -1) {
+        perror("waitpid failed");
+        exit(EXIT_FAILURE);
+      }
+
+      if (WIFEXITED(p_st)) {
+        status |= WEXITSTATUS(p_st);
+      }
     }
 
-    if (WIFEXITED(status)) {
-      lastStatus = WEXITSTATUS(status);
-    }
+    lastStatus = WEXITSTATUS(status);
   }
 
   return 0;
 }
 
-mode_t newFileMode =  S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
-
-int execcmd(char* tokens[], char* outfile) {
-  errno = 0;
-  int cid = fork();
-  if (cid < 0) {
-    perror("fork failed");
-    exit(EXIT_FAILURE);
-  }
-  else if (cid == 0) {
-    if (outfile != NULL) {
-      errno = 0;
-      int fd = open(outfile, O_WRONLY | O_CREAT, newFileMode);
-      if (fd < 0) {
-        perror("open failed");
-        exit(EXIT_FAILURE);
-      }
-      dup2(fd, 1);
-      close(fd);
-    }
-
-    execvp(*tokens, tokens);
-    perror("failed execvp");
-    exit(EXIT_FAILURE);
-  } else {
-    return cid;
-  }
-}
-
-int assignVariable(char* var, char* val, KeyValuePair variables[100]) {
+int setvar(char* var, char* val, kvpair_t variables[100]) {
   for (int i = 0; i < 100; i++) {
-    KeyValuePair* kvp = variables + i;
+    kvpair_t* kvp = variables + i;
     if (kvp->key == NULL) {
-      kvp->key = malloc(sizeof(char) * strnlen(var, BUFLEN) + 1);
+      kvp->key = malloc(sizeof(char) * (strnlen(var, BUFLEN) + 1));
       strcpy(kvp->key, var);
 
-      kvp->value = malloc(sizeof(char) * strnlen(val, BUFLEN) + 1);
+      kvp->value = malloc(sizeof(char) * (strnlen(val, BUFLEN) + 1));
       strcpy(kvp->value, val);
       return 0;
     } else if (strncmp(kvp->key, var, BUFLEN) == 0) {
       free(kvp->value);
-      kvp->value = malloc(sizeof(char) * strnlen(val, BUFLEN) + 1);
+      kvp->value = malloc(sizeof(char) * (strnlen(val, BUFLEN) + 1));
       strcpy(kvp->value, val);
       return 0;
     }
@@ -149,9 +128,9 @@ int assignVariable(char* var, char* val, KeyValuePair variables[100]) {
   return 1;
 }
 
-char* getVariable(char* var, KeyValuePair variables[100]) {
+char* getvar(char* var, kvpair_t variables[100]) {
   for (int i = 0; i < 100; i++) {
-    KeyValuePair* kvp = variables + i;
+    kvpair_t* kvp = variables + i;
     if (kvp->key == NULL)
       return NULL;
 
