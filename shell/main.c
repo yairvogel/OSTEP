@@ -13,8 +13,6 @@
 
 #define BUFLEN 1024
 
-__pid_t execcmd(char* tokens[], char* outfile);
-
 int main(int argc, char* argv[]) {
   UNUSED(argc);
   UNUSED(argv);
@@ -86,7 +84,7 @@ int main(int argc, char* argv[]) {
     syntaxtree_t* syntax = stparse(tokens);
     int* cids = stexec(syntax, outfile);
 
-    int status;
+    int status = 0;
     for (int* cid = cids; *cid != -1; cid++) {
       int p_st;
       if (waitpid(*cid, &p_st, 0) == -1) {

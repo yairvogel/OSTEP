@@ -12,22 +12,42 @@
 typedef int cid;
 typedef int fd;
 
-syntaxtree_t* new_statement(statement_t);
-syntaxtree_t* new_pipe(syntaxtree_t* left, syntaxtree_t* right);
+enum nodetype_t {
+  STATEMENT,
+  PIPE
+};
+
+struct syntaxnode_t {
+  enum nodetype_t nodetype;
+};
+
+struct statementnode_t {
+  struct syntaxnode_t self;
+  statement_t statement;
+};
+
+struct pipenode_t {
+  struct syntaxnode_t self;
+  struct syntaxnode_t* left;
+  struct syntaxnode_t* right;
+};
+
+struct statementnode_t* new_statement(statement_t);
+struct pipenode_t* new_pipe(syntaxtree_t* left, syntaxtree_t* right);
 int find (char* const tokens[], char* const term);
 
 syntaxtree_t* stparse(char* tokens[]) {
   int pipeidx = find(tokens, "|");
   if (pipeidx != -1) {
     tokens[pipeidx] = NULL;
-    syntaxtree_t* left = new_statement(tokens);
-    syntaxtree_t* right = stparse(tokens + pipeidx + 1);
-    syntaxtree_t* pipe = new_pipe(left, right);
+    struct syntaxnode_t* left = (struct syntaxnode_t*)new_statement(tokens);
+    struct syntaxnode_t* right = (struct syntaxnode_t*)stparse(tokens + pipeidx + 1);
+    struct pipenode_t* pipe = new_pipe(left, right);
     pipe->right = stparse(tokens + pipeidx + 1);
-    return pipe;
+    return (syntaxtree_t*)pipe;
   }
 
-  return new_statement(tokens);
+  return (syntaxtree_t*)new_statement(tokens);
 }
 
 mode_t newFileMode =  S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
@@ -58,10 +78,11 @@ int execcmd(char *const tokens[], fd input, fd output) {
 }
 
 void stexec_inner(syntaxtree_t* syntax, cid pids[], fd readfd, fd writefd) {
+  struct syntaxnode_t* node = syntax;
   int pipefd[2];
-  switch (syntax->nodetype) {
+  switch (node->nodetype) {
     case STATEMENT:
-      pids[0] = execcmd(syntax->statement, readfd, writefd);
+      pids[0] = execcmd(((struct statementnode_t*)syntax)->statement, readfd, writefd);
       break;
     case PIPE:
       errno = 0;
@@ -70,8 +91,8 @@ void stexec_inner(syntaxtree_t* syntax, cid pids[], fd readfd, fd writefd) {
         exit(EXIT_FAILURE);
       }
 
-      stexec_inner(syntax->left, pids, readfd, pipefd[1]);
-      stexec_inner(syntax->right, ++pids, pipefd[0], writefd);
+      stexec_inner(((struct pipenode_t*)syntax)->left, pids, readfd, pipefd[1]);
+      stexec_inner(((struct pipenode_t*)syntax)->right, ++pids, pipefd[0], writefd);
       break;
   }
 }
@@ -94,16 +115,16 @@ int* stexec(syntaxtree_t* syntax, char* outfile) {
   return pids;
 }
 
-syntaxtree_t* new_statement(statement_t statement) {
-  syntaxtree_t* st = malloc(sizeof(syntaxtree_t));
-  st->nodetype = STATEMENT;
+struct statementnode_t* new_statement(statement_t statement) {
+  struct statementnode_t* st = malloc(sizeof(struct statementnode_t));
+  st->self.nodetype = STATEMENT;
   st->statement = statement;
   return st;
 }
 
-syntaxtree_t* new_pipe(syntaxtree_t* left, syntaxtree_t* right) {
-  syntaxtree_t* st = malloc(sizeof(syntaxtree_t));
-  st->nodetype = PIPE;
+struct pipenode_t* new_pipe(syntaxtree_t* left, syntaxtree_t* right) {
+  struct pipenode_t* st = malloc(sizeof(struct pipenode_t));
+  st->self.nodetype = PIPE;
   st->left = left;
   st->right = right;
   return st;

@@ -83,5 +83,6 @@ void vartable_dump(void* table) {
   vartable_t* vartable = table;
   for (uint i = 0; i < vartable->len; i++) {
     kvpair_t kvp = vartable->arr[i];
+    printf("%s=%s\n", kvp.key, kvp.value);
   }
 }
