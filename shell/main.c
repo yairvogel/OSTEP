@@ -6,6 +6,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+// depends on <stdio.h>, so kept in a separate block to avoid include sorting
+#include <readline/history.h>
+#include <readline/readline.h>
+
 #include "syntax.h"
 #include "vartable.h"
 
@@ -17,31 +21,39 @@ int main(int argc, char *argv[]) {
   UNUSED(argc);
   UNUSED(argv);
 
-  char buf[BUFLEN];
+  char *buf = NULL;
   int lastStatus = 0;
   void *vartable = vartable_create(100);
+  using_history();
   while (1) {
+    const char *prompt;
     if (lastStatus) {
-      write(1, "! ", 2);
+      prompt = "! ";
     } else {
-      write(1, "> ", 2);
+      prompt = "> ";
     }
 
-    char *read = fgets(buf, BUFLEN - 1, stdin);
-    if (read == NULL) {
+    if (buf != NULL) {
+      free(buf);
+      buf = NULL;
+    }
+
+    char *buf = readline(prompt);
+    if (buf == NULL) {
       return 0;
     }
 
     char var[BUFLEN];
     char val[BUFLEN];
-    int l = sscanf(buf, "%s = %s\n", var, val);
+    int l = sscanf(buf, "%s = %s", var, val);
     if (l == 2) {
+      add_history(buf);
       vartable_set(vartable, var, val);
       continue;
     }
 
     char *tokens[512];
-    char *tok = strtok(buf, " \n");
+    char *tok = strtok(buf, " ");
     int len;
     for (len = 0; len < 511; len++) {
       if (tok == NULL)
@@ -58,7 +70,7 @@ int main(int argc, char *argv[]) {
       }
 
       tokens[len] = tok;
-      tok = strtok(NULL, " \n");
+      tok = strtok(NULL, " ");
     }
 
     tokens[len] = NULL;
@@ -82,6 +94,8 @@ int main(int argc, char *argv[]) {
       tokens[len - 2] = NULL;
     }
 
+    add_history(buf);
+
     syntaxtree_t *syntax = stparse(tokens);
     int *cids = stexec(syntax, outfile);
 
@@ -98,9 +112,10 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    lastStatus = WEXITSTATUS(status);
+    lastStatus = status;
   }
 
   vartable_destroy(vartable);
+  clear_history();
   return 0;
 }
