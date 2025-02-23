@@ -7,20 +7,12 @@
 #include <unistd.h>
 
 #include "syntax.h"
+#include "vartable.h"
 
 #define UNUSED(x) (void)(x)
 
 #define BUFLEN 1024
 
-typedef struct {
-  char* key;
-  char* value;
-} kvpair_t;
-
-kvpair_t variables[100] = { 0 };
-
-int setvar(char* var, char* val, kvpair_t variables[100]);
-char* getvar(char* const var, kvpair_t variables[100]);
 __pid_t execcmd(char* tokens[], char* outfile);
 
 int main(int argc, char* argv[]) {
@@ -29,6 +21,7 @@ int main(int argc, char* argv[]) {
 
   char buf[BUFLEN];
   int lastStatus = 0;
+  void* vartable = vartable_create(100);
   while (1) {
     if (lastStatus) {
       write(1, "! ", 2);
@@ -45,7 +38,7 @@ int main(int argc, char* argv[]) {
     char val[BUFLEN];
     int l = sscanf(buf, "%s = %s\n", var, val);
     if (l == 2) {
-      setvar(var, val, variables);
+      vartable_set(vartable, var, val);
       continue;
     }
     
@@ -57,7 +50,7 @@ int main(int argc, char* argv[]) {
 
       // parameter expansion
       if (tok[0] == '$') {
-        char* val = getvar(tok+1, variables);
+        char* val = vartable_get(vartable, tok+1);
         if (val == NULL) {
           *tok = '\0';
         } else {
@@ -77,6 +70,11 @@ int main(int argc, char* argv[]) {
 
     if (len == 1 && (strcmp(tokens[0], "exit") == 0)) {
       exit(0);
+    }
+
+    if (len == 1 && (strcmp(tokens[0], "dump") == 0)) {
+      vartable_dump(vartable);
+      continue;
     }
     
     char* outfile = NULL;
@@ -104,39 +102,6 @@ int main(int argc, char* argv[]) {
     lastStatus = WEXITSTATUS(status);
   }
 
+  vartable_destroy(vartable);
   return 0;
-}
-
-int setvar(char* var, char* val, kvpair_t variables[100]) {
-  for (int i = 0; i < 100; i++) {
-    kvpair_t* kvp = variables + i;
-    if (kvp->key == NULL) {
-      kvp->key = malloc(sizeof(char) * (strnlen(var, BUFLEN) + 1));
-      strcpy(kvp->key, var);
-
-      kvp->value = malloc(sizeof(char) * (strnlen(val, BUFLEN) + 1));
-      strcpy(kvp->value, val);
-      return 0;
-    } else if (strncmp(kvp->key, var, BUFLEN) == 0) {
-      free(kvp->value);
-      kvp->value = malloc(sizeof(char) * (strnlen(val, BUFLEN) + 1));
-      strcpy(kvp->value, val);
-      return 0;
-    }
-  }
-
-  return 1;
-}
-
-char* getvar(char* var, kvpair_t variables[100]) {
-  for (int i = 0; i < 100; i++) {
-    kvpair_t* kvp = variables + i;
-    if (kvp->key == NULL)
-      return NULL;
-
-    if (strncmp(kvp->key, var, BUFLEN) == 0)
-      return kvp->value;
-  }
-
-  return NULL;
 }
